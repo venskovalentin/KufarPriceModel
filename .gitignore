@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# data
+data/raw/
+data/processed/
+
+# model
+models/
+
+# enviroment
+.env
+venv/ 
