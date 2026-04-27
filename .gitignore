@@ -18,4 +18,7 @@ models/
 
 # enviroment
 .env
-venv/ 
+venv/
+
+# Claude
+CLAUDE.md
