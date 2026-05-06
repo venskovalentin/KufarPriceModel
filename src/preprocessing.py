@@ -423,7 +423,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return X
 
     def _drop_columns(self, X):
-        return X.drop(['list_time', 'ad_id', 'gaming_laptop'], axis=1)
+        return X.drop(['list_time', 'subject', 'ad_id', 'gaming_laptop'], axis=1)
 
     def extract(self, X, y=None):
         X = X.copy()
@@ -442,4 +442,5 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
 def preprocess(X, access_time, y=None):
     extractor = FeatureExtractor(access_time)
-        res = extractor
+    res = extractor.extract(X)
+    return res
