@@ -33,8 +33,6 @@ def extract_gpu_model(subject: str):
     if pd.isna(subject) or not isinstance(subject, str):
         return float('nan')
     s = subject
-    if pd.isna(subject):
-        return float('nan')
 
     def find_mem(text: str):
         """
@@ -320,22 +318,19 @@ def extract_first_number(series: pd.Series, transform=None) -> pd.Series:
     return result
 
 
+
+
+
 class FeatureExtractor(BaseEstimator, TransformerMixin):
     def __init__(self, access_time):
         self.access_time = access_time
 
-        self.unknown_features = [
-            'brand', 'videocard_brand', 'ram_type', 'matrix_type', 'rom_type',
-            'processor', 'os'
+        self.categorical_features = [
+            "ram_type", "display_resolution", "matrix_type", "region", "brand",
+            "videocard_brand", "videocard", "os", "rom_type", "processor"
         ]
-
-        self.mode_features = [
-            'display_resolution', 'rom_type'
-        ]
-
-        self.num_knn_features = [
-            'ram_volume', 'rom_volume', 'diagonal',
-            'battery_life'
+        self.numeric_features = [
+            "timedelta_minutes", "battery_life", "ram_volume", "diagonal", "rom_volume"
         ]
 
         self.resolution_map = {
@@ -368,7 +363,7 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         self.condition_map = {
             "Б/у": 0,
-            "Новое": 1
+            "новое": 1
         }
 
     def fit(self, X, y=None):
@@ -423,7 +418,8 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         return X
 
     def _drop_columns(self, X):
-        return X.drop(['list_time', 'subject', 'ad_id', 'gaming_laptop'], axis=1)
+        X = X.drop(['list_time', 'subject', 'ad_id', 'gaming_laptop'], axis=1)
+        return X
 
     def extract(self, X, y=None):
         X = X.copy()
@@ -437,10 +433,10 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
         X['company_ad'] = X['company_ad'].astype(int)
         X = X.fillna(np.nan)
-
+        for c in self.categorical_features:
+            X[c] = X[c].fillna("missing").astype(str)
         return X
 
-def preprocess(X, access_time, y=None):
-    extractor = FeatureExtractor(access_time)
-    res = extractor.extract(X)
-    return res
+    def transform(self, X, y=None):
+        res = self.extract(X)
+        return res
