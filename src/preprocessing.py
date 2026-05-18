@@ -1,10 +1,8 @@
 import pandas as pd
 import numpy as np
-import csv, os, re, json, glob
+import re
 from sklearn.base import BaseEstimator, TransformerMixin
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, FunctionTransformer
+from sklearn.preprocessing import OrdinalEncoder
 from sklearn.impute import SimpleImputer
 
 
@@ -322,9 +320,9 @@ def extract_first_number(series: pd.Series, transform=None) -> pd.Series:
 
 
 class FeatureExtractor(BaseEstimator, TransformerMixin):
-    def __init__(self, access_time):
+    def __init__(self, access_time, GBM_XGB=False):
         self.access_time = access_time
-
+        self.GBM_XGB = GBM_XGB
         self.categorical_features = [
             "ram_type", "display_resolution", "matrix_type", "region", "brand",
             "videocard_brand", "videocard", "os", "rom_type", "processor"
@@ -367,6 +365,18 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         }
 
     def fit(self, X, y=None):
+        if self.GBM_XGB:
+            X_extracted = self.extract(X)  # <- вот это
+
+            self.encoder = OrdinalEncoder(
+                handle_unknown='use_encoded_value',
+                unknown_value=-1
+            )
+            self.encoder.fit(X_extracted[self.categorical_features])
+
+            self.imp_mean = SimpleImputer(strategy='mean')
+            self.imp_mean.fit(X_extracted[self.numeric_features])
+
         return self
 
     def _fill_from_subject(self, X):
@@ -423,7 +433,6 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
 
     def extract(self, X, y=None):
         X = X.copy()
-
         X = self._fill_from_subject(X)
         X = self._fix_videocard(X)
         X = self._map_categoricals(X)
@@ -434,9 +443,23 @@ class FeatureExtractor(BaseEstimator, TransformerMixin):
         X['company_ad'] = X['company_ad'].astype(int)
         X = X.fillna(np.nan)
         for c in self.categorical_features:
-            X[c] = X[c].fillna("missing").astype(str)
+            if self.GBM_XGB:
+                X[c] = X[c].fillna("missing").astype(str).astype("category")
+            else:
+                X[c] = X[c].fillna("missing").astype(str)
         return X
 
     def transform(self, X, y=None):
+
         res = self.extract(X)
+
+        if self.GBM_XGB:
+            res[self.categorical_features] = self.encoder.transform(
+                res[self.categorical_features]
+            )
+
+            res[self.numeric_features] = self.imp_mean.transform(
+                res[self.numeric_features]
+            )
+
         return res
