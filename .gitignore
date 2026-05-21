@@ -1,3 +1,11 @@
+*.tmp
+*.json
+*.db
+*.tsv
+*.tfevents
+
+.idea
+
 # Python
 __pycache__/
 *.pyc
@@ -13,12 +21,18 @@ __pycache__/
 data/raw/
 data/processed/
 
+data/raw/
+data/processed/
+notebooks.catboost_info/
+*.tsv
+
+
+catboost_info/
+mlruns
+
 # model
 models/
 
 # enviroment
 .env
 venv/
-
-# Claude
-CLAUDE.md
