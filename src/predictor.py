@@ -1,25 +1,28 @@
-class predictor:
-    def init(self, model_path, meta_path):
+import os
+import json
+import pandas as pd
+import joblib
 
 
-        folder_path = r'..\data\raw'
-        file_type = '/*csv'
-        files = glob.glob(folder_path + file_type)
-        latest_file = max(files, key=os.path.getctime)
+class Predictor:
+    def __init__(self, model_path="models/xgb_pipeline.pkl", meta_path="models/model_meta.json"):
+        self.model_path = model_path
+        self.meta_path = meta_path
 
-        time = latest_file[12:].split(sep="_")
+        if os.path.exists(self.model_path):
+            self.model = joblib.load(self.model_path)
+        else:
+            self.model = None
+            print(f"Модель не найдена по пути {self.model_path}")
 
-        self.access_time = pd.Timestamp(
-            year=int(time[0][0:4]),
-            month=int(time[0][4:6]),
-            day=int(time[0][6:8]),
-            hour=int(time[1][0:2]),
-            minute=int(time[1][2:4]),
-            tz='Europe/Moscow'
-        )
+    def predict(self, data: pd.DataFrame):
+        if self.model is None:
+            raise ValueError("Модель не загружена. Сначала обучите её с помощью retrainer.py")
 
-    def predict(self, ad_dict) -> dict:
-        pass
+        return self.model.predict(data)
 
     def get_meta(self) -> dict:
-        pass
+        if os.path.exists(self.meta_path):
+            with open(self.meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {"error": "Файл метаданных не найден"}

@@ -68,7 +68,7 @@ def fetch_with_retry(url, headers, max_retries=3, base_delay=0.5):
     return None
 
 
-def parse_all_ads(URL, HEADERS):
+def parse_all_ads(url=URL, headers=HEADERS):
     all_ads = []
     counter = 0
 
@@ -96,7 +96,7 @@ def parse_all_ads(URL, HEADERS):
             break
 
         counter += 1
-        time.sleep(0.5)
+        time.sleep(0.1)
 
     return pd.DataFrame(all_ads)
 
