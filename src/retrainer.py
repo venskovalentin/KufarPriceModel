@@ -154,3 +154,6 @@ def retrainer(folder_path=r'..\data\raw', log_target=False):
         mlflow.log_artifact("models/model_meta.json")
 
     return xgb_pipeline
+
+if __name__ == "__main__":
+    retrainer(log_target=True)

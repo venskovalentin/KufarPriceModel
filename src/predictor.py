@@ -2,6 +2,7 @@ import os
 import json
 import pandas as pd
 import joblib
+import numpy as np  # Добавлен импорт numpy
 
 
 class Predictor:
@@ -15,11 +16,36 @@ class Predictor:
             self.model = None
             print(f"Модель не найдена по пути {self.model_path}")
 
-    def predict(self, data: pd.DataFrame):
+    def predict(self, data: pd.DataFrame) -> np.ndarray:
         if self.model is None:
-            raise ValueError("Модель не загружена. Сначала обучите её с помощью retrainer.py")
+            raise ValueError(
+            )
 
-        return self.model.predict(data)
+        preds = self.model.predict(data)
+
+        meta = self.get_meta()
+        if meta.get("log_target", False):
+            preds = np.expm1(preds)
+
+        return np.asarray(preds)
+
+    def predict_single(self, row: dict) -> dict:
+
+        df = pd.DataFrame([row])
+
+        price = float(self.predict(df)[0])
+
+        meta = self.get_meta()
+        mae = meta.get("metrics", {}).get("mae", price * 0.1)
+
+        lower = price - mae
+        upper = price + mae
+
+        return {
+            "price": round(price, 2),
+            "lower": round(lower, 2),
+            "upper": round(upper, 2),
+        }
 
     def get_meta(self) -> dict:
         if os.path.exists(self.meta_path):
