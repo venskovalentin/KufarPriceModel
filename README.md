@@ -1,4 +1,4 @@
-# KufarPriceModel — Dynamic Pricing Optimizer для рынка б/у ноутбуков
+# KufarPriceModel — Dynamic Pricing Prediction для рынка б/у ноутбуков
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -8,7 +8,7 @@
 End-to-end pet-проект: парсим объявления о ноутбуках с белорусской площадки
 [Kufar](https://www.kufar.by), обучаем градиентный бустинг прогнозировать
 справедливую цену и через десктоп-приложение помогаем находить недооценённые
-лоты.
+лоты, а также предсказывать цены на товары.
 
 > Метрики последней модели (на ~8 000 объявлений): **R² = 0.756, MAE ≈ 396 BYN,
 > RMSE ≈ 901 BYN, MAPE=47%, MedAE**, 
@@ -45,16 +45,14 @@ KufarPriceModel/
 ```
 
 Слои разделены по ответственности: сбор → препроцессинг → обучение →
-инференс → аналитика → UI. Препроцессор зашит внутрь sklearn-Pipeline,
-поэтому train-serve skew исключён.
+инференс → аналитика → UI.
 
 ## Стек
 
-`Python 3.11+` · `XGBoost` · `scikit-learn` · `MLflow` · `PyQt6` · `matplotlib`
-· `pandas` · `requests`
+`Python 3.11+` · `XGBoost` . `CatBosst` . `lightGBM` · `scikit-learn` · `MLflow` · `PyQt6` · `matplotlib` .  `seaborn` .
+· `pandas` · `requests` . `numpy`.
 
-В EDA-ноутбуках также сравниваются `CatBoost` / `LightGBM` и подбираются
-гиперпараметры через randomsearch
+В ноутбуках сравниваются различные бустинги.
 
 ## Установка
 
@@ -109,8 +107,8 @@ mlflow ui --backend-store-uri file://$PWD/mlruns    # macOS/Linux
 
 ## Как работает препроцессинг
 
-Ключевая особенность датасета — у части объявлений критичные поля (RAM, ROM,
-GPU, процессор) пустые: продавцы их пишут только в свободном тексте `subject`.
+Ключевая особенность датасета у большинства объявлений критичные поля (RAM, ROM,
+GPU, процессор) пустые: но продавцы зачастую их пишут в названии `subject`.
 `FeatureExtractor` ([src/preprocessing.py](src/preprocessing.py)) восстанавливает
 эти поля регулярками: понимает форматы `"16/512"`, `"16ГБ 1000ГБ"`,
 `"RTX 3060 Ti Max-Q"`, MacBook'и, Apple-style Mn Pro/Max/Ultra и т.д. Дальше
@@ -125,10 +123,7 @@ GPU, процессор) пустые: продавцы их пишут толь
 Парсер сохраняет 19 признаков: `ad_id, subject, price_byn, company_ad,
 list_time, condition, brand, processor, rom_volume, rom_type, diagonal, os,
 videocard, videocard_brand, region, gaming_laptop, matrix_type,
-display_resolution, ram_volume, ram_type, battery_life`.
-
-Имя файла кодирует время сбора (`YYYYMMDD_HHMM`) — оно же используется при
-обучении как «время доступа» для расчёта давности объявления.
+display_resolution, ram_volume, ram_type, battery_life`
 
 ## ToDo
 
