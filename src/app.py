@@ -1,9 +1,28 @@
-import sys
-import os
+"""PyQt6 desktop GUI for the Kufar laptop price model.
+
+Three tabs:
+
+* **Market Analysis** — filters, price histogram, listings table, and a
+  one-click "find underpriced" helper.
+* **Price Prediction** — fill in a laptop's specs, get a predicted price plus
+  a ±MAE confidence band, and compare it to your own asking price.
+* **Analytics** — model metrics, feature importance, and a background
+  retrain button that re-scrapes Kufar and refits the model in a QThread.
+"""
+
 import json
+import os
+import sys
+import traceback
+from datetime import datetime
+
 import numpy as np
 import pandas as pd
-from datetime import datetime
+
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 
 from PyQt6.QtWidgets import (
@@ -21,7 +40,7 @@ matplotlib.use("QtAgg")
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-# ── colours ──────────────────────────────────────────────────────────────────
+
 BG       = "#1e1e2e"
 BG_DEEP  = "#15151f"
 PANEL    = "#2a2a3e"
@@ -191,7 +210,6 @@ def label(text, color=TEXT, size=13, bold=False, parent=None):
     return l
 
 
-# ── Matplotlib canvas ─────────────────────────────────────────────────────────
 class MplCanvas(FigureCanvas):
     def __init__(self, width=5, height=3):
         self.fig = Figure(figsize=(width, height), facecolor=BG)
@@ -201,7 +219,6 @@ class MplCanvas(FigureCanvas):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
 
-# ── Retrain worker ────────────────────────────────────────────────────────────
 class RetrainWorker(QThread):
     progress = pyqtSignal(int, str)
     finished = pyqtSignal(dict)
@@ -209,51 +226,78 @@ class RetrainWorker(QThread):
 
     def run(self):
         try:
-            # import here to avoid circular issues at module load
-            import sys, os
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
             from retrainer import retrainer as do_retrain
 
             original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
 
-            page = [0]
+            state = {"size": 200, "saw_size_line": False}
+
             def progress_print(*args, **kwargs):
                 msg = " ".join(str(a) for a in args)
-                if "processing page" in msg.lower():
+                lower = msg.lower()
+                if not state["saw_size_line"] and "using page size" in lower:
+                    try:
+                        state["size"] = int(msg.strip().split("=")[-1])
+                        state["saw_size_line"] = True
+                    except Exception:
+                        pass
+                elif "processing page" in lower:
                     try:
                         n = int(msg.strip().split()[-1])
-                        page[0] = n
-                        pct = min(int(n / 6), 99)  # ~588 pages
+                        est_total = max(1, int(11000 / state["size"]))
+                        pct = min(int(n * 90 / est_total), 90)
                         self.progress.emit(pct, f"Parsing page {n}…")
                     except Exception:
                         pass
+                elif "saved" in lower and "ads to" in lower:
+                    self.progress.emit(92, "Training model…")
                 original_print(*args, **kwargs)
 
             import builtins
             builtins.print = progress_print
 
-            pipeline = do_retrain(log_target=True)
+            data_dir = os.path.join(_PROJECT_ROOT, "data", "raw")
+            models_dir = os.path.join(_PROJECT_ROOT, "models")
+            os.makedirs(data_dir, exist_ok=True)
+            os.makedirs(models_dir, exist_ok=True)
+            # retrainer writes "models/..." relative to cwd, so cd into project root
+            prev_cwd = os.getcwd()
+            os.chdir(_PROJECT_ROOT)
+            try:
+                pipeline = do_retrain(
+                    folder_path=data_dir,
+                    log_target=True,
+                    fetch_fresh=True,
+                )
+            finally:
+                os.chdir(prev_cwd)
 
             builtins.print = original_print
             self.progress.emit(100, "Training complete")
 
-            meta_path = os.path.join(os.path.dirname(__file__), "..", "models", "model_meta.json")
+            meta_path = os.path.join(_PROJECT_ROOT, "models", "model_meta.json")
             meta = {}
             if os.path.exists(meta_path):
                 with open(meta_path) as f:
                     meta = json.load(f)
             self.finished.emit(meta)
         except Exception as e:
-            self.error.emit(str(e))
+            try:
+                builtins.print = original_print
+            except Exception:
+                pass
+            traceback.print_exc()
+            self.error.emit(f"{type(e).__name__}: {e}")
 
 
-# ── Tab 1: Market Analysis ────────────────────────────────────────────────────
 class TabMarket(QWidget):
     def __init__(self, analyzer, predictor):
         super().__init__()
         self.analyzer = analyzer
         self.predictor = predictor
         self._build_ui()
+        if self.analyzer is not None:
+            self._populate_combos()
         self._refresh()
 
     def _build_ui(self):
@@ -261,7 +305,7 @@ class TabMarket(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── sidebar filters ──────────────────────────────────────────────────
+
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(240)
@@ -323,7 +367,6 @@ class TabMarket(QWidget):
 
         root.addWidget(sidebar)
 
-        # ── main area ────────────────────────────────────────────────────────
         main = QVBoxLayout()
         main.setContentsMargins(18, 18, 18, 18)
         main.setSpacing(14)
@@ -400,10 +443,6 @@ class TabMarket(QWidget):
 
         p_min, p_max = self.price_min.value(), self.price_max.value()
         df = df[(df["price_byn"] >= p_min) & (df["price_byn"] <= p_max)]
-
-        # populate filter dropdowns on first run
-        if self.f_brand.count() == 0:
-            self._populate_combos()
 
         # stats
         stats = {
@@ -485,7 +524,7 @@ class TabMarket(QWidget):
                         item.setForeground(QColor(GREEN))
                     item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
                     self.table.setItem(i, j, item)
-                # green row tint
+
                 for j in range(self.table.columnCount()):
                     if self.table.item(i, j):
                         self.table.item(i, j).setBackground(QColor(61, 214, 140, 20))
@@ -493,7 +532,6 @@ class TabMarket(QWidget):
             self.stats_label.setText(f"Error: {e}")
 
 
-# ── Tab 2: Price Prediction ───────────────────────────────────────────────────
 class TabPredict(QWidget):
     def __init__(self, analyzer, predictor):
         super().__init__()
@@ -561,11 +599,9 @@ class TabPredict(QWidget):
 
         root.addWidget(form_card, stretch=1)
 
-        # ── right: result ────────────────────────────────────────────────────
         right = QVBoxLayout()
         right.setSpacing(14)
 
-        # prediction card
         pred_card = card_frame()
         pred_card.setStyleSheet(
             f"QFrame#card {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:1, "
@@ -592,7 +628,6 @@ class TabPredict(QWidget):
 
         right.addWidget(pred_card, stretch=2)
 
-        # your price card
         your_card = card_frame()
         yc_layout = QVBoxLayout(your_card)
         yc_layout.setContentsMargins(18, 14, 18, 14)
@@ -639,7 +674,6 @@ class TabPredict(QWidget):
                 for v in vals:
                     w.addItem(str(v))
 
-        # sensible defaults for spinboxes
         if "ram_volume" in df.columns:
             med = pd.to_numeric(df["ram_volume"].dropna().str.extract(r'(\d+)')[0]).median()
             self.fields["ram_volume"].setValue(int(med) if not np.isnan(med) else 8)
@@ -659,12 +693,37 @@ class TabPredict(QWidget):
                 row[key] = val if val else np.nan
             elif isinstance(w, (QSpinBox, QDoubleSpinBox)):
                 row[key] = w.value()
+
+        try:
+            access_time = self.predictor.model.named_steps["extractor"].access_time
+        except Exception:
+            access_time = pd.Timestamp.now(tz="Europe/Moscow")
+
+        row.setdefault("subject", "")
+        row.setdefault("list_time", access_time)
+        row.setdefault("ad_id", 0)
+        row.setdefault("gaming_laptop", 0)
+        row.setdefault("company_ad", 0)
+        row.setdefault("videocard_brand", np.nan)
+        row.setdefault("ram_type", np.nan)
+        row.setdefault("matrix_type", np.nan)
+        row.setdefault("display_resolution", np.nan)
+
+        # XGBoost validates feature_names — return the dict in the same column
+        # order the model was trained on (raw CSV order, minus target).
+        if self.analyzer is not None:
+            ordered = {c: row[c] for c in self.analyzer.df.columns
+                       if c != "price_byn" and c in row}
+            for k, v in row.items():
+                if k not in ordered:
+                    ordered[k] = v
+            return ordered
         return row
 
     def _predict(self):
         if not self.predictor:
             self.price_label.setText("No model")
-            print("Predictor is None")  # добавь это
+            print("Predictor is None")
             return
         try:
             row = self._collect_row()
@@ -699,11 +758,11 @@ class TabPredict(QWidget):
             self.compare_label.setText("")
 
 
-# ── Tab 3: Analytics ──────────────────────────────────────────────────────────
 class TabAnalytics(QWidget):
-    def __init__(self, predictor):
+    def __init__(self, predictor, analyzer=None):
         super().__init__()
         self.predictor = predictor
+        self.analyzer  = analyzer
         self._worker   = None
         self._build_ui()
         self._load_meta()
@@ -813,9 +872,17 @@ class TabAnalytics(QWidget):
 
             importances = reg.feature_importances_
             extractor = model.named_steps.get("extractor")
-            if extractor and hasattr(extractor, "feature_names_out_"):
-                names = list(extractor.feature_names_out_)
-            else:
+            names = None
+            if extractor is not None and self.analyzer is not None:
+                try:
+                    sample = self.analyzer.df.drop(columns=["price_byn"]).head(1)
+                    transformed = extractor.transform(sample.copy())
+                    names = list(transformed.columns)
+                except Exception as e:
+                    print(f"FI names via transform failed: {e}")
+            if names is None and hasattr(reg, "feature_names_in_"):
+                names = list(reg.feature_names_in_)
+            if names is None:
                 names = [f"f{i}" for i in range(len(importances))]
 
             pairs = sorted(zip(names, importances), key=lambda x: x[1])[-15:]
@@ -865,7 +932,6 @@ class TabAnalytics(QWidget):
         self.btn_retrain.setEnabled(True)
 
 
-# ── Top bar ───────────────────────────────────────────────────────────────────
 class TopBar(QFrame):
     def __init__(self, tab_names, meta):
         super().__init__()
@@ -909,7 +975,6 @@ class TopBar(QFrame):
         self.tab_label.setText(name)
 
 
-# ── Main window ───────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -927,7 +992,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        TAB_NAMES = ["Market Analysis", "Price Prediction", "Analytics"]
+        TAB_NAMES = ["Market Analysis", "Price Prediction", "Model"]
 
         self.topbar = TopBar(TAB_NAMES, meta)
         layout.addWidget(self.topbar)
@@ -941,34 +1006,34 @@ class MainWindow(QMainWindow):
 
         self.tabs.addTab(TabMarket(self.analyzer, self.predictor),   "📊  Market Analysis")
         self.tabs.addTab(TabPredict(self.analyzer, self.predictor),  "🎯  Price Prediction")
-        self.tabs.addTab(TabAnalytics(self.predictor),               "📈  Analytics")
+        self.tabs.addTab(TabAnalytics(self.predictor, self.analyzer), "📈  Model")
 
     def _load_predictor(self):
         try:
-            base = os.path.dirname(os.path.abspath(__file__))
-            sys.path.insert(0, os.path.join(base, ".."))
             from predictor import Predictor
-            model_path = os.path.join(base, "..", "models", "xgb_pipeline.pkl")
-            meta_path  = os.path.join(base, "..", "models", "model_meta.json")
+            model_path = os.path.join(_PROJECT_ROOT, "models", "xgb_pipeline.pkl")
+            meta_path  = os.path.join(_PROJECT_ROOT, "models", "model_meta.json")
             p = Predictor(model_path=model_path, meta_path=meta_path)
+            if p.model is None:
+                print(f"Predictor: model file missing at {model_path}")
+                return None
             return p
         except Exception as e:
-            print(f"Predictor not loaded: {e}")  # уже есть, проверь вывод в консоли
+            print(f"Predictor not loaded: {e}")
+            traceback.print_exc()
             return None
 
     def _load_analyzer(self):
         try:
-            base = os.path.dirname(os.path.abspath(__file__))
-            sys.path.insert(0, os.path.join(base, ".."))
             from market_analyzer import MarketAnalyzer
-            data_path = os.path.join(base, "..", "data", "raw")
+            data_path = os.path.join(_PROJECT_ROOT, "data", "raw")
             return MarketAnalyzer(data_path=data_path)
         except Exception as e:
             print(f"Analyzer not loaded: {e}")
+            traceback.print_exc()
             return None
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyleSheet(QSS)

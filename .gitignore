@@ -1,38 +1,53 @@
-*.tmp
-*.json
-*.db
-*.tsv
-*.tfevents
-
-.idea
-
-# Python
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 .Python
 *.egg-info/
+build/
+dist/
 
-# Jupyter
+
+.venv/
+venv/
+env/
+.env
+
 .ipynb_checkpoints/
 
-# data
-data/raw/
-data/processed/
+.idea/
+.idea.zip
+.vscode/
+*.swp
+*.swo
+*.layout
+
+Thumbs.db
+.DS_Store
 
 data/raw/
 data/processed/
-notebooks.catboost_info/
-*.tsv
+notebooks/data.csv
+*.csv
+!data/raw/sample.csv
 
+models/
+*.pkl
+*.bak
+
+mlruns/
+**/mlruns/
+mlflow.db
+**/mlflow.db
 
 catboost_info/
-mlruns
+**/catboost_info/
+*.tfevents
+*.tsv
 
-# model
-models/
+*.zip
+*.docx
+*.tmp
 
-# enviroment
-.env
-venv/
+notebooks/*.png

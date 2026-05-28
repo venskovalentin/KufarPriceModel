@@ -1,48 +1,47 @@
-import os
 import glob
 import json
+import os
+from datetime import datetime
+
 import joblib
 import mlflow
 import mlflow.sklearn
-
-from datetime import datetime
-
 import numpy as np
 import pandas as pd
 
+from sklearn.metrics import (
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 
-from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    r2_score,
-    mean_absolute_error,
-    mean_squared_error
-)
-
+from src.kufar_parser import fetch_and_save
 from src.preprocessing import FeatureExtractor
 
 
-def retrainer(folder_path=r'..\data\raw', log_target=False):
+def retrainer(folder_path=r'..\data\raw', log_target=False, fetch_fresh=True):
+
+    if fetch_fresh:
+        fetch_and_save(folder_path)
 
     files = glob.glob(os.path.join(folder_path, '*.csv'))
-
     if not files:
-        raise FileNotFoundError(
-            f'CSV файлы не найдены в {folder_path}'
-        )
+        raise FileNotFoundError(f'No CSV files found in {folder_path}')
 
     latest_file = max(files, key=os.path.getctime)
-
-    print(f"Загружаем файл: {latest_file}")
+    print(f"Loading file: {latest_file}")
 
     df = pd.read_csv(latest_file)
-
+    # Drop a long left tail of broken/incomplete listings — they're noise.
     df = df[df["price_byn"] > 30]
 
+    # The file name encodes the scrape time. We reuse it as "access_time" so
+    # the FeatureExtractor can compute a listing-age feature.
     filename = os.path.basename(latest_file)
     time_str = filename.split("_")
-
     access_time = pd.Timestamp(
         year=int(time_str[0][0:4]),
         month=int(time_str[0][4:6]),
@@ -53,7 +52,6 @@ def retrainer(folder_path=r'..\data\raw', log_target=False):
     )
 
     target = "price_byn"
-
     X = df.drop(columns=[target])
     y = df[target]
 
@@ -61,18 +59,11 @@ def retrainer(folder_path=r'..\data\raw', log_target=False):
         y = np.log1p(y)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
+        X, y, test_size=0.2, random_state=42
     )
 
     xgb_pipeline = Pipeline([
-        ('extractor', FeatureExtractor(
-            access_time,
-            GBM_XGB=True
-        )),
-
+        ('extractor', FeatureExtractor(access_time, GBM_XGB=True)),
         ('regressor', XGBRegressor(
             n_estimators=1179,
             learning_rate=0.020428215357261675,
@@ -87,16 +78,18 @@ def retrainer(folder_path=r'..\data\raw', log_target=False):
             random_state=42,
             enable_categorical=True,
             verbosity=0,
-            n_jobs=-1
-        ))
+            n_jobs=-1,
+        )),
     ])
 
+    # Pin the MLflow store to the project root so runs land in the same place
+    # regardless of which cwd retrainer is launched from (GUI / notebook / CLI).
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    mlflow.set_tracking_uri(f"file:///{project_root.replace(os.sep, '/')}/mlruns")
     mlflow.set_experiment("kufar-notebook")
 
     with mlflow.start_run():
-
         xgb_pipeline.fit(X_train, y_train)
-
         y_pred = xgb_pipeline.predict(X_test)
 
         if log_target:
@@ -121,39 +114,29 @@ def retrainer(folder_path=r'..\data\raw', log_target=False):
         mlflow.log_param("reg_alpha", 1.654490124263246)
         mlflow.log_param("reg_lambda", 1.5720251525742128)
 
-
         mlflow.log_metric("r2", r2)
         mlflow.log_metric("mae", mae)
         mlflow.log_metric("rmse", rmse)
 
         os.makedirs("models", exist_ok=True)
-
         model_path = "models/xgb_pipeline.pkl"
-
         joblib.dump(xgb_pipeline, model_path)
 
-        mlflow.sklearn.log_model(
-            sk_model=xgb_pipeline,
-            artifact_path="model"
-        )
+        mlflow.sklearn.log_model(sk_model=xgb_pipeline, artifact_path="model")
 
         meta = {
             "trained_at": datetime.now().isoformat(),
             "n_samples": len(X_train),
             "log_target": log_target,
-            "metrics": {
-                "r2": r2,
-                "mae": mae,
-                "rmse": rmse
-            }
+            "metrics": {"r2": r2, "mae": mae, "rmse": rmse},
         }
-
         with open("models/model_meta.json", "w") as f:
             json.dump(meta, f, indent=2)
 
         mlflow.log_artifact("models/model_meta.json")
 
     return xgb_pipeline
+
 
 if __name__ == "__main__":
     retrainer(log_target=True)
