@@ -125,13 +125,6 @@ list_time, condition, brand, processor, rom_volume, rom_type, diagonal, os,
 videocard, videocard_brand, region, gaming_laptop, matrix_type,
 display_resolution, ram_volume, ram_type, battery_life`
 
-## ToDo
-
-- [ ] Сбор большего числа признаков, векторизация subject, парсинг и extractoin значений из описания.
-- [ ] Перенос инференса в REST-сервис (FastAPI).
-- [ ] Дрейф признаков между снапшотами (Evidently).
-- [ ] Регистрация модели в MLflow Model Registry со stages.
-
 ## Важно
 
 - API Kufar геоблокирован вне РБ/РФ — для парсинга может потребоваться VPN.
